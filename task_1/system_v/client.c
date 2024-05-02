@@ -5,48 +5,39 @@
 #include <sys/msg.h>
 #include <string.h>
 
-#define MSGSZ 128
+#define BUF_SIZE 64 // Размер буфера для текстовых сообщений
 
-typedef struct msgbuf {
-    long mtype;
-    char mtext[MSGSZ];
-} message_buf;
+// Структура сообщения с приоритетом и текстом
+struct msgbuf {
+    long priority; // Приоритет сообщения
+    char text[BUF_SIZE]; // Текст сообщения
+};
 
-int main() {
-    int msqid;
-    key_t key;
-    message_buf rbuf, sbuf;
-    size_t buflen;
+int main()
+{
+    int msqid_server_to_client = 0, // ID очереди сообщений от сервера к клиенту
+        msqid_client_to_server = 0; // ID очереди сообщений от клиента к серверу
+    struct msgbuf *buf = (struct msgbuf *)malloc(sizeof(struct msgbuf)); // Выделяем память для структуры сообщения
 
-    // Генерация того же ключа, что и у сервера
-    if ((key = ftok("server.c", 'B')) == -1) {
-        perror("ftok");
-        exit(1);
-    }
+    // Получаем ID очереди для сообщений от сервера к клиенту
+    msqid_server_to_client = msgget(ftok("server", 1), 0);
 
-    // Подключение к очереди сообщений
-    if ((msqid = msgget(key, 0666)) == -1) {
-        perror("msgget");
-        exit(1);
-    }
+    // Получаем ID очереди для сообщений от клиента к серверу
+    msqid_client_to_server = msgget(ftok("client", 2), 0);
 
-    // Получение сообщения от сервера
-    if (msgrcv(msqid, &rbuf, MSGSZ, 0, 0) == -1) {
-        perror("msgrcv");
-        exit(1);
-    }
-    printf("Received message from the server: %s\n", rbuf.mtext);
+    printf("client: "); // Печать префикса перед получением сообщения
+    // Получаем сообщение из очереди "server_to_client"
+    msgrcv(msqid_server_to_client, buf, sizeof(struct msgbuf), 0, 0);
+    printf("%ld\n%s\n", buf->priority, buf->text); // Выводим приоритет и текст полученного сообщения
 
-    // Отправка ответа серверу
-    strcpy(sbuf.mtext, "Hello!");
-    sbuf.mtype = 2;
-    buflen = strlen(sbuf.mtext) + 1;
+    // Заполняем текстовое поле буфера новым сообщением и отправляем его в очередь "client_to_server"
+    sprintf(buf->text, "Hello server from client");
+    msgsnd(msqid_client_to_server, buf, sizeof(struct msgbuf), 0);
 
-    if (msgsnd(msqid, &sbuf, buflen, 0) == -1) {
-        perror("msgsnd");
-        exit(1);
-    }
+    // Удаляем очереди сообщений после завершения работы
+    msgctl(msqid_server_to_client, IPC_RMID, NULL);
+    msgctl(msqid_client_to_server, IPC_RMID, NULL);
 
-    return 0;
+    exit(EXIT_SUCCESS); // Завершаем программу успешно
 }
 

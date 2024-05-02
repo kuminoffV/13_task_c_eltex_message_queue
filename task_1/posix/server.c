@@ -1,52 +1,46 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <mqueue.h>
+#include <errno.h>
+#include <unistd.h>
+#include <string.h>
 
-#define QUEUE_NAME "/test_queue"
-#define MAX_MSG_SIZE 256
+int main()
+{
+    int priority = 0; // Переменная для приоритета сообщений
 
-int main() {
-    struct mq_attr attr;
-    mqd_t mq;
-    char buffer[MAX_MSG_SIZE];
-    int msg_len;
+    // Удаляем существующие очереди, чтобы начать с нуля
+    mq_unlink("/server_to_client");
+    mq_unlink("/client_to_server");
 
-    // Set up the message queue attributes
-    attr.mq_flags = 0;
-    attr.mq_maxmsg = 10;
-    attr.mq_msgsize = MAX_MSG_SIZE;
-    attr.mq_curmsgs = 0;
+    // Открываем или создаем очередь сообщений (от сервера к клиенту) для записи
+    mqd_t mqdes_server_to_client = mq_open("/server_to_client", O_WRONLY | O_CREAT, 0600, NULL);
 
-    // Create the message queue
-    mq = mq_open(QUEUE_NAME, O_CREAT | O_RDWR, 0666, &attr);
-    if (mq == -1) {
-        perror("Server: mq_open");
-        exit(1);
-    }
+    // Открываем или создаем очередь сообщений (от клиента к серверу) для чтения
+    mqd_t mqdes_client_to_server = mq_open("/client_to_server", O_RDONLY | O_CREAT, 0600, NULL);
+    
+    // Создаем структуру, чтобы получить атрибуты очереди
+    struct mq_attr *attr = (struct mq_attr *)malloc(sizeof(struct mq_attr));
+    mq_getattr(mqdes_server_to_client, attr); // Получаем атрибуты очереди
+    char *buf = (char *)malloc(sizeof(char) * attr->mq_msgsize); // Выделяем буфер для сообщений
 
-    // Send message to client
-    if (mq_send(mq, "Hi!", sizeof("Hi!"), 0) == -1) {
-        perror("Server: mq_send");
-        exit(1);
-    }
+    // Подготавливаем и отправляем сообщение (от сервера к клиенту)
+    sprintf(buf, "Hi client from server");
+    printf("Send message\n");
+    mq_send(mqdes_server_to_client, buf, strlen(buf), 0);
 
-    printf("Server: Sent 'Hi!' to client.\n");
+    printf("Waiting message\n"); // Сообщение о том, что сервер ожидает сообщения
+    memset(buf, 0, sizeof(char) * attr->mq_msgsize); // Очищаем буфер
+    // Получаем сообщение из очереди (от клиента к серверу)
+    mq_receive(mqdes_client_to_server, buf, attr->mq_msgsize + 1, &priority);
+    printf("Message: %s\n", buf); // Выводим полученное сообщение
 
-    // Receive response from client
-    msg_len = mq_receive(mq, buffer, MAX_MSG_SIZE, NULL);
-    if (msg_len == -1) {
-        perror("Server: mq_receive");
-        exit(1);
-    }
+    // Закрываем очереди сообщений
+    mq_close(mqdes_server_to_client);
+    mq_close(mqdes_client_to_server);
 
-    buffer[msg_len] = '\0'; // Null terminate the string
-    printf("Server: Received message from client: %s\n", buffer);
-
-    // Close and unlink the message queue
-    mq_close(mq);
-    mq_unlink(QUEUE_NAME);
-
-    return 0;
+    exit(EXIT_SUCCESS); // Завершаем программу
 }
 
